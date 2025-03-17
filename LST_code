@@ -1,0 +1,70 @@
+// Define AOI (change as needed)
+// Shapefile downloaded from Humanitarian Data Exchange platform (data.humdata.org)
+var aoi = ee.FeatureCollection("projects/ee-karmagis/assets/Rohingya_camp_outlines");
+
+Map.addLayer(aoi, {}, 'camp');
+
+// Define the date ranges for each year
+var years = [2013, 2018, 2024];
+var startMonth = '04-01';
+var endMonth = '08-31';
+
+// Function to apply scaling factors and convert LST to °C
+function applyScaleFactors(image) {
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0).subtract(273.15);
+  return image.addBands(opticalBands, null, true)
+              .addBands(thermalBands, null, true);
+}
+
+// Cloud Masking Function
+function cloudMask(image) {
+  var cloudShadowBitmask = (1 << 4);
+  var cloudBitmask = (1 << 3);
+  var cirrus = (1 << 2);
+  var qa = image.select('QA_PIXEL');
+  var mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0)
+                .and(qa.bitwiseAnd(cloudBitmask).eq(0))
+                .and(qa.bitwiseAnd(cirrus).eq(0));
+  return image.updateMask(mask);
+}
+
+// Function to process images for a given year
+function getLST(year) {
+  var startDate = year + '-' + startMonth;
+  var endDate = year + '-' + endMonth;
+
+  var collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+                    .filterBounds(aoi)
+                    .filterDate(startDate, endDate)
+                    .map(applyScaleFactors)
+                    .map(cloudMask)
+                    .median()
+                    .clip(aoi);
+  
+  return collection;
+}
+
+// Loop through years and process images
+years.forEach(function(year) {
+  var lstImage = getLST(year);
+  
+  // Add True Color composite
+  Map.addLayer(lstImage, {bands: ['SR_B4', 'SR_B3', 'SR_B2'], min: 0.0, max: 0.2}, 'True Color ' + year);
+  
+  // Add LST Layer
+  Map.addLayer(lstImage.select('ST_B10'), {
+    min: 18.47,
+    max: 42.86,
+    palette: [
+      '040274', '040281', '0502a3', '0502b8', '0502ce', '0502e6',
+      '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef',
+      '3be285', '3ff38f', '86e26f', '3ae237', 'b5e22e', 'd6e21f',
+      'fff705', 'ffd611', 'ffb613', 'ff8b13', 'ff6e08', 'ff500d',
+      'ff0000', 'de0101', 'c21301', 'a71001', '911003'
+    ]}, 'LST ' + year);
+  
+  print('LST Image for ' + year, lstImage);
+});
+
+Map.centerObject(aoi, 9);
