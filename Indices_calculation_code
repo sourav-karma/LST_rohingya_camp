@@ -1,0 +1,72 @@
+var aoi = ee.FeatureCollection("projects/ee-karmagis/assets/Rohingya_camp_outlines");
+Map.addLayer(aoi, {}, 'Camp AOI');
+
+var years = [2013, 2018, 2024];
+var startMonth = '04-01';
+var endMonth = '08-30';
+
+function applyScaleFactors(image) {
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  return image.addBands(opticalBands, null, true);
+}
+
+function cloudMask(image) {
+  var cloudShadowBitmask = (1 << 4);
+  var cloudBitmask = (1 << 3);
+  var cirrus = (1 << 2);
+  var qa = image.select('QA_PIXEL');
+  var mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0)
+                .and(qa.bitwiseAnd(cloudBitmask).eq(0))
+                .and(qa.bitwiseAnd(cirrus).eq(0));
+  return image.updateMask(mask);
+}
+
+function calculateIndices(image) {
+  var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+  var ndwi = image.normalizedDifference(['SR_B3', 'SR_B5']).rename('NDWI');
+  var ndbi = image.normalizedDifference(['SR_B6', 'SR_B5']).rename('NDBI');
+  return image.addBands([ndvi, ndwi, ndbi]);
+}
+
+function processYear(year) {
+  var startDate = year + '-' + startMonth;
+  var endDate = year + '-' + endMonth;
+
+  var collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+                    .filterBounds(aoi)
+                    .filterDate(startDate, endDate)
+                    .map(applyScaleFactors)
+                    .map(cloudMask)
+                    .median()
+                    .clip(aoi);
+
+  var processedImage = calculateIndices(collection);
+
+  Map.addLayer(processedImage, {bands: ['SR_B4', 'SR_B3', 'SR_B2'], min: 0.0, max: 0.2}, 'RGB ' + year);
+  Map.addLayer(processedImage.select('NDVI'), {min: -1, max: 1, palette: ['blue', 'white', 'green']}, 'NDVI ' + year);
+  Map.addLayer(processedImage.select('NDWI'), {min: -1, max: 1, palette: ['brown', 'white', 'blue']}, 'NDWI ' + year);
+  Map.addLayer(processedImage.select('NDBI'), {min: -1, max: 1, palette: ['white', 'yellow', 'red']}, 'NDBI ' + year);
+
+  Export.image.toDrive({
+    image: processedImage.select('NDVI', 'NDWI', 'NDBI'),
+    description: 'Indices_' + year,
+    folder: 'GEE_Exports',
+    fileNamePrefix: 'Indices_' + year,
+    scale: 30,
+    region: aoi.geometry(),
+    maxPixels: 1e13
+  });
+
+  Export.image.toDrive({
+    image: processedImage.select(['SR_B4', 'SR_B3', 'SR_B2']),
+    description: 'RGB_' + year,
+    folder: 'GEE_Exports',
+    fileNamePrefix: 'RGB_' + year,
+    scale: 30,
+    region: aoi.geometry(),
+    maxPixels: 1e13
+  });
+}
+
+years.forEach(processYear);
+Map.centerObject(aoi, 9);
