@@ -1,0 +1,66 @@
+//// Area calculation and classification of LST values ////////////////
+
+
+import rasterio
+import numpy as np
+import os
+import csv
+
+# Define the directory and filenames
+directory = r'C:\Users\karma\Desktop\STUDY_UCL\SELF_HELP\LST_CAMP\area_calculation'
+files = ['LST_camp2013.tif', 'LST_camp2018.tif', 'LST_camp2024.tif']
+
+# Define temperature classes (in Celsius)
+classes = [(20, 30.5), (30.5, 33.5), (33.5, 36.5), (36.5, 39.5), (39.5, 55)]
+
+# Fixed pixel area: 30m * 30m = 900 square meters
+pixel_area = 900  # in square meters
+
+# CSV output file path
+output_csv = r'C:\Users\karma\Desktop\STUDY_UCL\SELF_HELP\LST_CAMP\area_calculation\LST_up_areas.csv'
+
+# Function to calculate area of pixels in each class
+def calculate_area_per_class(raster_path, classes):
+    print(f"Processing: {raster_path}")
+    with rasterio.open(raster_path) as src:
+        # Read the raster data (first band)
+        lst_data = src.read(1)
+
+        # Mask out NoData values
+        lst_data = np.ma.masked_equal(lst_data, src.nodata)
+
+        # Dictionary to store areas for each class
+        class_areas = {}
+
+        for temp_class in classes:
+            # Get a mask for pixels in the current class range
+            class_mask = (lst_data >= temp_class[0]) & (lst_data < temp_class[1])
+
+            # Calculate the number of pixels in this class
+            pixel_count = np.sum(class_mask)
+
+            # Calculate the area covered by this class
+            area_covered = pixel_count * pixel_area  # in square meters
+            class_areas[temp_class] = area_covered
+
+        return class_areas
+
+# Prepare to write CSV
+with open(output_csv, mode='w', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    
+    # Write the header row
+    header = ['Raster', 'Temperature Range (°C)', 'Area (km²)']
+    writer.writerow(header)
+    
+    # Loop through each raster file and calculate area for each temperature class
+    for file in files:
+        file_path = os.path.join(directory, file)
+        area_per_class = calculate_area_per_class(file_path, classes)
+
+        # Write the results to CSV
+        for temp_class, area in area_per_class.items():
+            row = [file, f'{temp_class[0]} - {temp_class[1]}', area / 1e6]  # Convert area to km²
+            writer.writerow(row)
+
+print(f"Area calculations have been written to {output_csv}")
